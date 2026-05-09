@@ -17,6 +17,9 @@ async function initFocusPanel() {
   const yearEl = document.getElementById('focus-year');
   const phaseEl = document.getElementById('focus-phase');
   const paperEl = document.getElementById('focus-paper');
+  const navYearEl = document.getElementById('nav-focus-year');
+  const navThemeEl = document.getElementById('nav-focus-theme');
+  const navPaperEl = document.getElementById('nav-focus-paper');
 
   if (!yearEl || !phaseEl || !paperEl) {
     return;
@@ -29,13 +32,40 @@ async function initFocusPanel() {
     const node = nodeById.get(state.selectedPaperId);
     const rangeStart = Number.isFinite(state.yearRangeStart) ? state.yearRangeStart : state.year;
     const rangeEnd = Number.isFinite(state.yearRangeEnd) ? state.yearRangeEnd : state.year;
-    yearEl.textContent = rangeStart !== rangeEnd ? `${rangeStart}-${rangeEnd}` : String(rangeEnd);
+    const yearText = rangeStart !== rangeEnd ? `${rangeStart}-${rangeEnd}` : String(rangeEnd);
+    const paperText = node ? shorten(node.title, 56) : '未选择论文';
+    yearEl.textContent = yearText;
     phaseEl.textContent = phaseLabelByYear(rangeEnd);
-    paperEl.textContent = node ? shorten(node.title, 56) : '未选择论文';
+    paperEl.textContent = paperText;
+    if (navYearEl) navYearEl.textContent = yearText;
+    if (navThemeEl) navThemeEl.textContent = state.selectedTheme || '未选择主题';
+    if (navPaperEl) navPaperEl.textContent = paperText;
   }
 
   render(getAppState());
   onAppStateChange(({ state }) => render(state));
+}
+
+function initStoryNav() {
+  const nav = document.querySelector('.story-nav');
+  const toggle = document.getElementById('story-nav-toggle');
+  const icon = toggle?.querySelector('.toggle-icon');
+
+  if (!nav || !toggle || !icon) return;
+
+  function syncToggle() {
+    const collapsed = nav.classList.contains('is-collapsed');
+    icon.textContent = collapsed ? '‹' : '›';
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.setAttribute('aria-label', collapsed ? '展开侧边栏' : '折叠侧边栏');
+  }
+
+  toggle.addEventListener('click', () => {
+    nav.classList.toggle('is-collapsed');
+    syncToggle();
+  });
+
+  syncToggle();
 }
 
 export function bootstrapApp() {
@@ -54,6 +84,7 @@ export function bootstrapApp() {
   initButterflyPath(butterflyPathEl);
   initInstitutionMap(institutionMapEl);
   initMetroMap(metroMapEl);
+  initStoryNav();
   initFocusPanel().catch(() => {
     // The charts remain usable even if the summary panel cannot load its copy.
   });
