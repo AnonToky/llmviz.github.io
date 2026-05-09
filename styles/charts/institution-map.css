@@ -1,3 +1,7 @@
+/* ═══════════════════════════════════════════════
+   Institution Map – Styles
+   ═══════════════════════════════════════════════ */
+
 .institution-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 260px;
@@ -5,87 +9,314 @@
   align-items: stretch;
 }
 
-.map-institution-link {
-  stroke: var(--muted);
-  stroke-linecap: round;
-  stroke-opacity: 0.2;
-  transition: stroke-opacity 160ms ease, stroke 160ms ease;
-}
-
-.map-institution-link.is-active {
-  stroke: #d97706;
-  stroke-opacity: 0.78;
+/* ── Base map styling ── */
+.map-ocean {
+  fill: #e8f4f8;
 }
 
 .world-land {
-  fill: var(--surface-soft);
-  stroke: var(--line);
-  stroke-width: 0.8;
+  fill: #f5f0e8;
+  stroke: #c8c0b4;
+  stroke-width: 0.5;
+  stroke-linejoin: round;
+}
+
+.map-graticule {
+  fill: none;
+  stroke: #d6e8ef;
+  stroke-width: 0.3;
+  stroke-dasharray: 2 3;
+  opacity: 0.7;
 }
 
 .map-canvas {
-  cursor: move;
+  cursor: default;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #e8f4f8;
 }
 
-.map-viewport {
-  transform-origin: 0 0;
+.map-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+/* ── Points & symbols ── */
+.map-point-group {
+  cursor: pointer;
+  transition: transform 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .map-point {
-  fill-opacity: 0.88;
+  fill-opacity: 0.9;
   stroke: #ffffff;
-  stroke-width: 0.9;
+  stroke-width: 1.2;
   cursor: pointer;
-  transition: fill-opacity 160ms ease, stroke-width 160ms ease, stroke 160ms ease;
+  transition: fill-opacity 200ms ease, stroke-width 200ms ease, stroke 200ms ease, transform 200ms ease;
 }
 
-.map-point:hover,
-.map-point.is-selected {
+.map-point:hover {
   fill-opacity: 1;
   stroke: var(--accent-strong);
-  stroke-width: 2;
+  stroke-width: 2.2;
+  transform: scale(1.15);
 }
 
-.map-point.is-related {
-  fill-opacity: 1;
-  stroke: #facc15;
-  stroke-width: 2.6;
+/* ── Pulse ring animation ── */
+.map-pulse-ring {
+  stroke-width: 1.5;
+  opacity: 0.6;
+  animation: map-pulse 2.4s ease-out infinite;
+  pointer-events: none;
 }
 
+@keyframes map-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  70% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+/* ── Labels ── */
 .map-label {
   fill: var(--muted-strong);
-  font-size: var(--fs-300);
+  font-size: 9px;
   font-weight: var(--font-weight-semibold);
   paint-order: stroke;
   pointer-events: none;
-  stroke: rgba(255, 255, 255, 0.9);
-  stroke-width: 1.5px;
+  stroke: rgba(255, 255, 255, 0.92);
+  stroke-width: 2.5px;
+  letter-spacing: 0.01em;
 }
 
+/* ── Institution links ── */
+.map-institution-link {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-opacity: 0.12;
+  transition: stroke-opacity 200ms ease, stroke 200ms ease;
+}
+
+.map-institution-link:hover {
+  stroke-opacity: 0.5;
+}
+
+/* ── Legend ── */
 .legend-swatch {
   display: inline-block;
   width: 10px;
   height: 10px;
   border-radius: 999px;
   margin-right: 6px;
+  vertical-align: middle;
 }
 
+/* ── Year control panel ── */
+.map-year-control {
+  width: 100%;
+}
+
+.map-year-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-3);
+}
+
+.map-year-label {
+  font-size: var(--fs-300);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text);
+}
+
+.map-year-value {
+  font-size: var(--fs-400);
+  font-weight: var(--font-weight-bold);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 2px 10px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.map-range-row {
+  position: relative;
+  height: 28px;
+  display: flex;
+  align-items: center;
+}
+
+.map-range-row input[type="range"] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.map-range-row input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  background: transparent;
+  border-radius: 2px;
+}
+
+.map-range-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  pointer-events: all;
+  margin-top: -7px;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+
+.map-range-row input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.map-range-row input[type="range"]::-moz-range-track {
+  height: 4px;
+  background: transparent;
+  border-radius: 2px;
+}
+
+.map-range-row input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-strong);
+  border: 3px solid #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  pointer-events: all;
+}
+
+/* Track background */
+.map-range-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  background: var(--line);
+  border-radius: 2px;
+  z-index: 0;
+}
+
+.map-year-ticks {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0 0;
+  font-size: 9px;
+  color: var(--muted);
+  user-select: none;
+}
+
+.map-year-ticks span {
+  width: 0;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* ── Play button ── */
+.map-play-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.map-play-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 20px;
+  background: var(--accent-strong);
+  color: #fff;
+  font-size: var(--fs-200);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: background 160ms ease, transform 120ms ease;
+  box-shadow: 0 2px 8px rgba(15, 76, 92, 0.2);
+}
+
+.map-play-btn:hover {
+  background: var(--accent);
+  transform: translateY(-1px);
+}
+
+.map-play-btn.is-playing {
+  background: var(--danger);
+}
+
+.map-play-btn.is-playing:hover {
+  background: #c94535;
+}
+
+.map-cumulative-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-200);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.map-cumulative-label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent-strong);
+  cursor: pointer;
+}
+
+/* ── Side panel ── */
 .institution-side-panel {
   min-height: 100%;
   border: var(--border-width) solid var(--line);
   border-radius: 8px;
   background: var(--surface);
   padding: var(--space-5);
+  overflow-y: auto;
+  max-height: 520px;
 }
 
 .institution-side-panel h4 {
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   color: var(--text);
   font-size: var(--fs-300);
+  font-weight: var(--font-weight-bold);
 }
 
 .institution-scenario-evidence {
-  margin: calc(var(--space-4) * -1) 0 var(--space-4);
+  margin: 0 0 var(--space-4);
   color: var(--text-secondary);
   font-size: var(--fs-200);
   line-height: 1.45;
@@ -98,7 +329,7 @@
 
 .institution-rank-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) 42px;
+  grid-template-columns: 24px minmax(0, 1fr) 48px;
   gap: var(--space-2);
   align-items: center;
   width: 100%;
@@ -107,20 +338,23 @@
   background: var(--surface-soft);
   color: var(--muted-strong);
   cursor: pointer;
-  padding: var(--space-2);
+  padding: 6px 8px;
   text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 120ms ease;
 }
 
 .institution-rank-row:hover,
-.institution-rank-row:focus-visible,
-.institution-rank-row.is-related {
-  border-color: #d97706;
+.institution-rank-row:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  transform: translateX(2px);
   outline: none;
 }
 
 .institution-rank-row span {
   color: var(--muted);
   font-size: var(--fs-100);
+  font-weight: var(--font-weight-bold);
 }
 
 .institution-rank-row strong {
@@ -139,8 +373,22 @@
   text-align: right;
 }
 
+/* ── Scenario panel adjustments ── */
+.institution-scenario-panel {
+  padding: var(--space-5);
+}
+
+/* ── Responsive ── */
 @media (max-width: 900px) {
   .institution-layout {
     grid-template-columns: 1fr;
+  }
+
+  .institution-side-panel {
+    max-height: 300px;
+  }
+
+  .map-year-ticks span:nth-child(even) {
+    display: none;
   }
 }
