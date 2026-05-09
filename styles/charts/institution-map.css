@@ -52,6 +52,16 @@
   stroke-width: 2.6;
 }
 
+.map-point.is-growth {
+  stroke: #16a34a;
+  stroke-width: 2.4;
+}
+
+.map-point.is-decline {
+  stroke: #dc2626;
+  stroke-width: 2.4;
+}
+
 .map-label {
   fill: var(--muted-strong);
   font-size: var(--fs-300);

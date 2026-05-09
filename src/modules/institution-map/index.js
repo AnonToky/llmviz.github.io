@@ -7,21 +7,21 @@ const MAP_SCENARIOS = {
   leader: {
     label: '谁在主导',
     question: '哪些机构在 LLM 论文主线中最有影响力？',
-    description: '按综合影响力展示头部机构，适合回答研究力量是否集中在少数公司、实验室和大学。',
+    description: '看看是哪些公司、实验室和大学在主导这段研究史。力量是集中在少数玩家，还是群体推进？',
     rankTitle: '影响力排行',
     metric: 'influence_score'
   },
   paper: {
     label: '论文背后是谁',
     question: '当前选中的论文由哪些机构推动？',
-    description: '保留头部机构，同时把选中论文对应机构拉入视野，用描边和排行高亮说明论文背后的组织来源。',
+    description: '选了一篇论文后，它的作者来自哪些机构？这些机构在整个故事中扮演什么角色？',
     rankTitle: '当前论文相关机构',
     metric: 'papers_count'
   },
   bridge: {
     label: '谁连接主线',
     question: '哪些机构通过引用关系把不同论文主线连接起来？',
-    description: '优先展示机构之间的共同引用联系，帮助观察哪些机构在不同阶段和不同流派之间承担桥梁角色。',
+    description: '故事的不同章节需要有人来接力。这些机构如何在不同的研究阶段和流派之间架起桥梁？',
     rankTitle: '联系强度排行',
     metric: 'link_count'
   }
@@ -231,14 +231,46 @@ function summarizePapers(papers) {
     .map((paper) => `${paper.year}《${paper.title.length > 36 ? `${paper.title.slice(0, 35)}...` : paper.title}》`);
 }
 
+function buildYearBuckets(nodes, aliasLookup, institutionNames) {
+  const years = Array.from(new Set(nodes.map((node) => Number(node.year)).filter(Number.isFinite))).sort((a, b) => a - b);
+  const buckets = new Map();
+
+  nodes.forEach((node) => {
+    const year = Number(node.year);
+    if (!Number.isFinite(year)) return;
+    const institutionList = normalizeNodeInstitutions(node, aliasLookup, institutionNames);
+    if (!buckets.has(year)) buckets.set(year, new Map());
+    institutionList.forEach((name) => {
+      const current = buckets.get(year).get(name) || {
+        institution: name,
+        papers_count: 0,
+        citations_count: 0,
+        year_score: 0,
+        papers: []
+      };
+      current.papers_count += 1;
+      current.citations_count += Number(node.citations_count) || 0;
+      current.year_score += ((Number(node.citations_count) || 0) * 0.12) + 1;
+      current.papers.push(node);
+      buckets.get(year).set(name, current);
+    });
+  });
+
+  return { years, buckets };
+}
+
+function formatYearLabel(year) {
+  return Number.isFinite(year) ? `${year} 年` : '当前年份';
+}
+
 export async function initInstitutionMap(container) {
   if (!container) return;
 
   container.innerHTML = `
     <div class="module-shell">
       <p class="module-tag">Module 04</p>
-      <h3 class="module-title">机构影响力地理图</h3>
-      <p class="module-subtitle">把机构地图从“哪里有点”改成“谁在推动这条研究主线”：比较主导机构、当前论文来源和跨主线连接者。</p>
+      <h3 class="module-title">故事幕后：是谁在推动这条线</h3>
+      <p class="module-subtitle">机构不是背景板，而是故事背后的推进者；这里看公司、实验室和大学如何在不同年份接力。
       <div class="scenario-panel institution-scenario-panel">
         <div>
           <p class="scenario-kicker">问题场景</p>
@@ -250,6 +282,28 @@ export async function initInstitutionMap(container) {
         </div>
       </div>
       <div class="chart-toolbar chart-toolbar-wrap">
+        <label class="chart-control map-year-control">
+          年份
+          <input class="chart-range map-year-range" type="range" min="0" max="0" step="1" value="0" />
+          <output class="year-badge map-year-output">2026</output>
+        </label>
+        <label class="chart-control map-compare-toggle-control">
+          <input class="map-compare-toggle" type="checkbox" />
+          对比另一年
+        </label>
+        <label class="chart-control map-compare-year-control">
+          对比年
+          <input class="chart-range map-compare-year-range" type="range" min="0" max="0" step="1" value="0" disabled />
+          <output class="year-badge map-compare-year-output">2025</output>
+        </label>
+        <label class="chart-control map-compare-filter-control">
+          变化方向
+          <select class="chart-select map-compare-filter" disabled>
+            <option value="all">全部变化</option>
+            <option value="growth">只看增长</option>
+            <option value="decline">只看下降</option>
+          </select>
+        </label>
         <label class="chart-control">
           颜色维度
           <select class="chart-select map-color-mode">
@@ -288,6 +342,12 @@ export async function initInstitutionMap(container) {
 
   const colorModeEl = container.querySelector('.map-color-mode');
   const sizeModeEl = container.querySelector('.map-size-mode');
+  const yearRangeEl = container.querySelector('.map-year-range');
+  const yearOutputEl = container.querySelector('.map-year-output');
+  const compareToggleEl = container.querySelector('.map-compare-toggle');
+  const compareYearRangeEl = container.querySelector('.map-compare-year-range');
+  const compareYearOutputEl = container.querySelector('.map-compare-year-output');
+  const compareFilterEl = container.querySelector('.map-compare-filter');
   const linkToggle = container.querySelector('.map-link-toggle');
   const statEl = container.querySelector('.chart-stat');
   const svg = container.querySelector('.chart-svg');
@@ -300,7 +360,7 @@ export async function initInstitutionMap(container) {
   const evidenceEl = container.querySelector('.institution-scenario-evidence');
   const rankingTitleEl = container.querySelector('.institution-ranking-title');
 
-  if (!colorModeEl || !sizeModeEl || !linkToggle || !statEl || !svg || !detailEl || !legendEl || !rankingEl || !questionTitleEl || !questionCopyEl || !evidenceEl || !rankingTitleEl) return;
+  if (!colorModeEl || !sizeModeEl || !yearRangeEl || !yearOutputEl || !compareToggleEl || !compareYearRangeEl || !compareYearOutputEl || !compareFilterEl || !linkToggle || !statEl || !svg || !detailEl || !legendEl || !rankingEl || !questionTitleEl || !questionCopyEl || !evidenceEl || !rankingTitleEl) return;
 
   try {
     const [world, rawInstitutions, nodes, edges, aliasRows] = await Promise.all([
@@ -318,6 +378,7 @@ export async function initInstitutionMap(container) {
     const institutions = mergeInstitutions(rawInstitutions, aliasLookup);
     const institutionNames = new Set(institutions.map((item) => item.institution));
     const byName = new Map(institutions.map((item) => [item.institution, item]));
+    const { years, buckets } = buildYearBuckets(nodes, aliasLookup, institutionNames);
     const instLinks = buildInstitutionLinks(nodes, edges, aliasLookup, institutionNames).slice(0, 55);
     const linkStrength = createLinkStrength(instLinks);
     const papersByInstitution = new Map(institutions.map((item) => [item.institution, []]));
@@ -347,6 +408,83 @@ export async function initInstitutionMap(container) {
     let anchorById = new Map();
     let visibleIds = new Set();
     let activeScenarioId = 'leader';
+    let compareEnabled = false;
+    let compareFocus = 'all';
+    const yearMin = years[0] || 2013;
+    const yearMax = years[years.length - 1] || 2026;
+    const initialYear = Math.min(yearMax, Math.max(yearMin, Number(getAppState().yearRangeEnd) || yearMax));
+    const initialCompareYear = Math.max(yearMin, initialYear - 1);
+
+    yearRangeEl.min = String(yearMin);
+    yearRangeEl.max = String(yearMax);
+    yearRangeEl.value = String(initialYear);
+    yearOutputEl.textContent = String(initialYear);
+    compareYearRangeEl.min = String(yearMin);
+    compareYearRangeEl.max = String(yearMax);
+    compareYearRangeEl.value = String(initialCompareYear);
+    compareYearOutputEl.textContent = String(initialCompareYear);
+    compareFilterEl.disabled = true;
+
+    function selectedYear() {
+      const year = Number(getAppState().yearRangeEnd);
+      return Number.isFinite(year) ? year : initialYear;
+    }
+
+    function compareYear() {
+      const year = Number(compareYearRangeEl.value);
+      return Number.isFinite(year) ? year : initialCompareYear;
+    }
+
+    function yearBucket() {
+      return buckets.get(selectedYear()) || new Map();
+    }
+
+    function compareBucket() {
+      return buckets.get(compareYear()) || new Map();
+    }
+
+    function comparisonStatsFor(name) {
+      const current = yearBucket().get(name) || { institution: name, papers_count: 0, citations_count: 0, year_score: 0, papers: [] };
+      const previous = compareBucket().get(name) || { institution: name, papers_count: 0, citations_count: 0, year_score: 0, papers: [] };
+      return {
+        current,
+        previous,
+        papersDelta: current.papers_count - previous.papers_count,
+        citationsDelta: current.citations_count - previous.citations_count,
+        scoreDelta: current.year_score - previous.year_score
+      };
+    }
+
+    function compareMatches(delta) {
+      if (compareFocus === 'growth') return delta > 0;
+      if (compareFocus === 'decline') return delta < 0;
+      return true;
+    }
+
+    function yearStatsFor(name) {
+      return yearBucket().get(name) || {
+        institution: name,
+        papers_count: 0,
+        citations_count: 0,
+        year_score: 0,
+        papers: []
+      };
+    }
+
+    function publishYear(year) {
+      const nextYear = Math.min(yearMax, Math.max(yearMin, year));
+      yearRangeEl.value = String(nextYear);
+      yearOutputEl.textContent = String(nextYear);
+      setAppState({ year: nextYear, yearRangeStart: nextYear, yearRangeEnd: nextYear }, 'institution-map');
+    }
+
+    function syncCompareYear(year) {
+      const nextYear = Math.min(yearMax, Math.max(yearMin, year));
+      compareYearRangeEl.value = String(nextYear);
+      compareYearOutputEl.textContent = String(nextYear);
+    }
+
+    publishYear(initialYear);
 
     function activeScenario() {
       return MAP_SCENARIOS[activeScenarioId] || MAP_SCENARIOS.leader;
@@ -471,14 +609,23 @@ export async function initInstitutionMap(container) {
 
     function visibleInstitutions() {
       const relatedNames = selectedPaperInstitutions();
-      const scenario = activeScenario();
+      const yearItems = Array.from(yearBucket().values())
+        .map((item) => byName.get(item.institution) || item)
+        .filter(Boolean);
       let top;
-      if (activeScenarioId === 'bridge') {
-        top = pickBalancedInstitutions(institutions, (item) => scenarioValue(item, scenario, linkStrength));
+      if (compareEnabled) {
+        const comparedItems = (yearItems.length ? yearItems : institutions)
+          .filter((item) => compareMatches(comparisonStatsFor(item.institution).scoreDelta));
+        top = pickBalancedInstitutions(
+          comparedItems.length ? comparedItems : yearItems.length ? yearItems : institutions,
+          (item) => Math.abs(comparisonStatsFor(item.institution).scoreDelta)
+        );
+      } else if (activeScenarioId === 'bridge') {
+        top = pickBalancedInstitutions(yearItems, (item) => yearStatsFor(item.institution).year_score);
       } else if (activeScenarioId === 'paper' && relatedNames.size) {
-        top = pickBalancedInstitutions(institutions, (item) => (relatedNames.has(item.institution) ? 1000 : 0) + item.influence_score);
+        top = pickBalancedInstitutions(yearItems, (item) => (relatedNames.has(item.institution) ? 1000 : 0) + yearStatsFor(item.institution).papers_count);
       } else {
-        top = pickBalancedInstitutions(institutions, (item) => item.influence_score);
+        top = pickBalancedInstitutions(yearItems.length ? yearItems : institutions, (item) => yearStatsFor(item.institution).year_score);
       }
       relatedNames.forEach((name) => {
         const item = byName.get(name);
@@ -498,15 +645,23 @@ export async function initInstitutionMap(container) {
         button.setAttribute('aria-selected', String(active));
       });
       const paperInsts = selectedPaperInstitutions();
-      if (activeScenarioId === 'paper') {
+      if (compareEnabled) {
+        const topRise = Array.from(yearBucket().values())
+          .map((item) => ({ name: item.institution, delta: comparisonStatsFor(item.institution).papersDelta }))
+          .filter((item) => compareMatches(item.delta))
+          .sort((a, b) => b.delta - a.delta)[0];
+        evidenceEl.textContent = topRise
+          ? `${formatYearLabel(selectedYear())}对比 ${compareYear()} 年，增长最快的是 ${topRise.name}（+${topRise.delta} 篇）。`
+          : `${formatYearLabel(selectedYear())}暂无可对比的机构变化。`;
+      } else if (activeScenarioId === 'paper') {
         evidenceEl.textContent = paperInsts.size
-          ? `当前论文关联 ${paperInsts.size} 个已归一化机构。`
+          ? `${formatYearLabel(selectedYear())}当前论文关联 ${paperInsts.size} 个已归一化机构。`
           : '先在论文网络、路径图或地铁图中选中论文，可查看其机构归属。';
       } else if (activeScenarioId === 'bridge') {
-        evidenceEl.textContent = `基于 ${instLinks.length} 条机构共同引用联系计算。`;
+        evidenceEl.textContent = `${formatYearLabel(selectedYear())}基于 ${instLinks.length} 条机构共同引用联系计算。`;
       } else {
-        const top = institutions.slice().sort((a, b) => b.influence_score - a.influence_score)[0];
-        evidenceEl.textContent = top ? `当前样本最高影响力机构：${top.institution}。` : '';
+        const top = Array.from(yearBucket().values()).sort((a, b) => b.year_score - a.year_score || b.papers_count - a.papers_count)[0];
+        evidenceEl.textContent = top ? `${formatYearLabel(selectedYear())}主要论文来源：${top.institution}。` : `${formatYearLabel(selectedYear())}暂无论文数据。`;
       }
     }
 
@@ -561,24 +716,48 @@ export async function initInstitutionMap(container) {
 
     function renderRanking() {
       const paperInsts = selectedPaperInstitutions();
-      const scenario = activeScenario();
+      const yearItems = Array.from(yearBucket().values());
       rankingEl.innerHTML = '';
-      institutions
-        .slice()
+      const candidates = (yearItems.length ? yearItems : institutions.map((item) => ({
+        institution: item.institution,
+        papers_count: 0,
+        citations_count: 0,
+        year_score: 0,
+        papers: []
+      })))
+        .filter((item) => !compareEnabled || compareMatches(comparisonStatsFor(item.institution).scoreDelta))
         .sort((a, b) => {
+          if (compareEnabled) {
+            const deltaA = Math.abs(comparisonStatsFor(a.institution).scoreDelta);
+            const deltaB = Math.abs(comparisonStatsFor(b.institution).scoreDelta);
+            return deltaB - deltaA || comparisonStatsFor(b.institution).papersDelta - comparisonStatsFor(a.institution).papersDelta;
+          }
           const relatedDiff = activeScenarioId === 'paper'
             ? Number(paperInsts.has(b.institution)) - Number(paperInsts.has(a.institution))
             : 0;
-          return relatedDiff || scenarioValue(b, scenario, linkStrength) - scenarioValue(a, scenario, linkStrength) || b.influence_score - a.influence_score;
+          const scoreA = activeScenarioId === 'bridge' ? yearStatsFor(a.institution).year_score : activeScenarioId === 'paper' ? yearStatsFor(a.institution).papers_count : yearStatsFor(a.institution).year_score;
+          const scoreB = activeScenarioId === 'bridge' ? yearStatsFor(b.institution).year_score : activeScenarioId === 'paper' ? yearStatsFor(b.institution).papers_count : yearStatsFor(b.institution).year_score;
+          return relatedDiff || scoreB - scoreA || b.papers_count - a.papers_count || b.citations_count - a.citations_count;
         })
         .slice(0, 12)
         .forEach((item, index) => {
           const row = document.createElement('button');
+          const institution = byName.get(item.institution) || institutions.find((candidate) => candidate.institution === item.institution);
           row.type = 'button';
           row.className = paperInsts.has(item.institution) ? 'institution-rank-row is-related' : 'institution-rank-row';
-          const value = scenarioValue(item, scenario, linkStrength);
-          row.innerHTML = `<span>${index + 1}</span><strong>${item.institution}</strong><em>${value}</em>`;
-          row.addEventListener('click', () => setAppState({ selectedInstitutionId: item.id }, 'institution-map'));
+          const value = compareEnabled
+            ? comparisonStatsFor(item.institution).papersDelta
+            : activeScenarioId === 'bridge'
+              ? yearStatsFor(item.institution).year_score
+              : activeScenarioId === 'paper'
+                ? yearStatsFor(item.institution).papers_count
+                : yearStatsFor(item.institution).year_score;
+          row.innerHTML = compareEnabled
+            ? `<span>${index + 1}</span><strong>${item.institution}</strong><em>${value > 0 ? '+' : ''}${Math.round(value)}</em>`
+            : `<span>${index + 1}</span><strong>${item.institution}</strong><em>${Math.round(value)}</em>`;
+          if (institution) {
+            row.addEventListener('click', () => setAppState({ selectedInstitutionId: institution.id }, 'institution-map'));
+          }
           rankingEl.appendChild(row);
         });
     }
@@ -589,14 +768,19 @@ export async function initInstitutionMap(container) {
         detailEl.textContent = '没有可用机构数据。';
         return;
       }
-      const papers = papersByInstitution.get(selected.institution) || [];
+      const currentStats = yearStatsFor(selected.institution);
+      const deltaStats = comparisonStatsFor(selected.institution);
+      const papers = currentStats.papers || [];
       const selectedPaper = nodes.find((node) => node.id === getAppState().selectedPaperId);
       const selectedPaperText = selectedPaper
         ? `当前选中论文《${selectedPaper.title}》${selectedPaperInstitutions().has(selected.institution) ? '属于该机构。' : '暂未归到该机构。'}`
         : '尚未选中论文。';
       const paperText = summarizePapers(papers).join('；') || '暂无可展示论文';
       const linkText = `机构联系强度 ${linkStrength.get(selected.institution) || 0}`;
-      detailEl.innerHTML = `<strong>${selected.institution}</strong> · ${selected.city}, ${selected.country}<br />论文数 ${selected.papers_count}，引用数 ${selected.citations_count.toLocaleString()}，影响力 ${selected.influence_score}，类型 ${selected.org_type}，${linkText}。<br />${selectedPaperText}<br />代表论文：${paperText}`;
+      const compareText = compareEnabled
+        ? `<br />对比 ${compareYear()} 年：论文 ${deltaStats.papersDelta > 0 ? '+' : ''}${deltaStats.papersDelta}，引用 ${deltaStats.citationsDelta > 0 ? '+' : ''}${Math.round(deltaStats.citationsDelta)}，活跃度 ${deltaStats.scoreDelta > 0 ? '+' : ''}${Math.round(deltaStats.scoreDelta)}`
+        : '';
+      detailEl.innerHTML = `<strong>${selected.institution}</strong> · ${selected.city}, ${selected.country}<br />${formatYearLabel(selectedYear())}论文数 ${currentStats.papers_count}，引用数 ${currentStats.citations_count.toLocaleString()}，活跃度 ${Math.round(currentStats.year_score)}，类型 ${selected.org_type}，${linkText}。${compareText}<br />${selectedPaperText}<br />本年代表论文：${paperText}`;
     }
 
     function renderPoints() {
@@ -608,13 +792,29 @@ export async function initInstitutionMap(container) {
       pointLayer.innerHTML = '';
       labelLayer.innerHTML = '';
       anchorLayer.innerHTML = '';
-      const values = visible.map((item) => Number(item[sizeMode]) || 0);
+      const values = visible.map((item) => {
+        const stats = compareEnabled ? comparisonStatsFor(item.institution) : yearStatsFor(item.institution);
+        return compareEnabled
+          ? (sizeMode === 'citations_count' ? Math.abs(stats.citationsDelta) : Math.abs(stats.scoreDelta))
+          : (sizeMode === 'papers_count' ? stats.papers_count : sizeMode === 'citations_count' ? stats.citations_count : stats.year_score);
+      });
       const minValue = Math.min(...values);
       const maxValue = Math.max(...values);
-      const radiusById = new Map(visible.map((item) => [item.id, mapRange(Number(item[sizeMode]) || 0, minValue, maxValue, 4, 11)]));
+      const radiusById = new Map(visible.map((item) => {
+        const stats = compareEnabled ? comparisonStatsFor(item.institution) : yearStatsFor(item.institution);
+        const value = compareEnabled
+          ? (sizeMode === 'papers_count' ? Math.abs(stats.papersDelta) : sizeMode === 'citations_count' ? Math.abs(stats.citationsDelta) : Math.abs(stats.scoreDelta))
+          : sizeMode === 'papers_count'
+            ? stats.papers_count
+            : sizeMode === 'citations_count'
+              ? stats.citations_count
+              : stats.year_score;
+        return [item.id, mapRange(value, minValue, maxValue, 4, 11)];
+      }));
       positionById = computePositions(visible, radiusById);
       visible.forEach((item) => {
         const radius = radiusById.get(item.id);
+        const stats = compareEnabled ? comparisonStatsFor(item.institution) : yearStatsFor(item.institution);
         const anchor = anchorById.get(item.id);
         const projected = positionById.get(item.id);
         if (anchor && projected && Math.hypot(projected.x - anchor.x, projected.y - anchor.y) > 3) {
@@ -627,8 +827,15 @@ export async function initInstitutionMap(container) {
         symbol.setAttribute('data-id', item.id);
         symbol.classList.toggle('is-related', selectedNames.has(item.institution));
         symbol.classList.toggle('is-selected', getAppState().selectedInstitutionId === item.id);
+        if (compareEnabled) {
+          const delta = stats.papersDelta;
+          symbol.classList.toggle('is-growth', delta > 0);
+          symbol.classList.toggle('is-decline', delta < 0);
+        }
         const title = createSvgElement('title');
-        title.textContent = `${item.institution}\n${item.country}\n${sizeMode}: ${item[sizeMode]}`;
+        title.textContent = compareEnabled
+          ? `${item.institution}\n${item.country}\n对比 ${selectedYear()} vs ${compareYear()}\n论文变化: ${stats.papersDelta > 0 ? '+' : ''}${stats.papersDelta}\n引用变化: ${Math.round(stats.citationsDelta) > 0 ? '+' : ''}${Math.round(stats.citationsDelta)}`
+          : `${item.institution}\n${item.country}\n${formatYearLabel(selectedYear())}${sizeMode === 'papers_count' ? `论文数: ${stats.papers_count}` : sizeMode === 'citations_count' ? `引用数: ${stats.citations_count}` : `活跃度: ${Math.round(stats.year_score)}`}`;
         symbol.appendChild(title);
         group.appendChild(symbol);
         group.addEventListener('pointerdown', (event) => event.stopPropagation());
@@ -647,7 +854,10 @@ export async function initInstitutionMap(container) {
           labelLayer.appendChild(label);
         }
       });
-      statEl.textContent = `可见机构 ${visible.length}/${institutions.length} · 归一化别名 ${aliasLookup.size} 个 · 联系 ${instLinks.length} 条`;
+      statEl.textContent = `${formatYearLabel(selectedYear())}可见机构 ${visible.length}/${yearBucket().size || institutions.length} · 归一化别名 ${aliasLookup.size} 个 · 联系 ${instLinks.length} 条`;
+      if (compareEnabled) {
+        statEl.textContent = `${formatYearLabel(selectedYear())}对比 ${compareYear()} 年 · 可见机构 ${visible.length}/${yearBucket().size || institutions.length} · 归一化别名 ${aliasLookup.size} 个 · 联系 ${instLinks.length} 条`;
+      }
       renderScenario();
       renderLinks();
       renderRanking();
@@ -656,17 +866,41 @@ export async function initInstitutionMap(container) {
       updateOverlayPositions();
     }
 
+    yearRangeEl.addEventListener('input', () => {
+      publishYear(Number(yearRangeEl.value));
+    });
+    compareToggleEl.addEventListener('change', () => {
+      compareEnabled = compareToggleEl.checked;
+      compareYearRangeEl.disabled = !compareEnabled;
+      compareFilterEl.disabled = !compareEnabled;
+      renderPoints();
+    });
+    compareYearRangeEl.addEventListener('input', () => {
+      syncCompareYear(Number(compareYearRangeEl.value));
+      if (compareEnabled) renderPoints();
+    });
+    compareFilterEl.addEventListener('change', () => {
+      compareFocus = compareFilterEl.value;
+      if (compareEnabled) renderPoints();
+    });
     colorModeEl.addEventListener('change', renderPoints);
     sizeModeEl.addEventListener('change', renderPoints);
     linkToggle.addEventListener('change', renderPoints);
     scenarioButtons.forEach((button) => {
       button.addEventListener('click', () => {
         activeScenarioId = button.dataset.scenario || 'leader';
-        if (activeScenarioId === 'bridge') sizeModeEl.value = 'influence_score';
+        if (activeScenarioId === 'bridge') sizeModeEl.value = 'papers_count';
+        if (activeScenarioId === 'leader' && sizeModeEl.value === 'influence_score') sizeModeEl.value = 'papers_count';
         renderPoints();
       });
     });
-    onAppStateChange(() => renderPoints());
+    onAppStateChange(({ state }) => {
+      if (Number.isFinite(state.yearRangeEnd) && String(state.yearRangeEnd) !== yearRangeEl.value) {
+        yearRangeEl.value = String(state.yearRangeEnd);
+        yearOutputEl.textContent = String(state.yearRangeEnd);
+      }
+      renderPoints();
+    });
     svg.addEventListener('wheel', (event) => {
       event.preventDefault();
       const rect = svg.getBoundingClientRect();
