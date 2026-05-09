@@ -3,10 +3,25 @@ import { getAppState, onAppStateChange, setAppState } from '../../shared/app-sta
 import { createInteractiveTooltip, escapeHtml, institutionLink } from '../../shared/interactive-tooltip.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const MIN_YEAR = 2013;
+const MAX_YEAR = 2026;
+
+/* ── LLM 领域关键事件标注 ── */
+const MILESTONES = [
+  { year: 2013, label: 'Word2Vec' },
+  { year: 2014, label: 'Seq2Seq' },
+  { year: 2017, label: 'Transformer' },
+  { year: 2018, label: 'BERT / GPT' },
+  { year: 2020, label: 'GPT-3' },
+  { year: 2022, label: 'ChatGPT 发布' },
+  { year: 2023, label: 'GPT-4 / LLaMA' },
+  { year: 2024, label: '多模态大模型' },
+  { year: 2026, label: '智能体时代' }
+];
 
 function createSvgElement(tag, attrs = {}) {
   const el = document.createElementNS(SVG_NS, tag);
-  Object.entries(attrs).forEach(([key, value]) => el.setAttribute(key, String(value)));
+  Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, String(v)));
   return el;
 }
 
@@ -16,90 +31,66 @@ function asArray(value) {
   return [];
 }
 
-/* ── Map projection (Equirectangular with slight Y compression for aesthetics) ── */
+/* ── 投影 ── */
 function projectLonLat(lon, lat, width, height, padding) {
-  const x = padding + ((lon + 180) / 360) * (width - padding * 2);
-  const y = padding + ((90 - lat) / 160) * (height - padding * 2); // compress poles
-  return { x, y };
+  return {
+    x: padding + ((lon + 180) / 360) * (width - padding * 2),
+    y: padding + ((90 - lat) / 160) * (height - padding * 2)
+  };
 }
 
-function polygonToPath(rings, width, height, padding) {
-  return rings
-    .map((ring) => {
-      if (!ring.length) return '';
-      const head = projectLonLat(ring[0][0], ring[0][1], width, height, padding);
-      const body = ring.slice(1).map(([lon, lat]) => {
-        const p = projectLonLat(lon, lat, width, height, padding);
-        return `L${p.x},${p.y}`;
-      }).join(' ');
-      return `M${head.x},${head.y} ${body}Z`;
-    })
-    .join(' ');
+function polygonToPath(rings, w, h, p) {
+  return rings.map(ring => {
+    if (!ring.length) return '';
+    const head = projectLonLat(ring[0][0], ring[0][1], w, h, p);
+    const body = ring.slice(1).map(([lon, lat]) => {
+      const pt = projectLonLat(lon, lat, w, h, p);
+      return `L${pt.x.toFixed(1)},${pt.y.toFixed(1)}`;
+    }).join('');
+    return `M${head.x.toFixed(1)},${head.y.toFixed(1)}${body}Z`;
+  }).join('');
 }
 
-function geometryToPath(geometry, width, height, padding) {
-  if (!geometry) return '';
-  if (geometry.type === 'Polygon') return polygonToPath(geometry.coordinates, width, height, padding);
-  if (geometry.type === 'MultiPolygon') return geometry.coordinates.map((p) => polygonToPath(p, width, height, padding)).join(' ');
+function geometryToPath(g, w, h, p) {
+  if (!g) return '';
+  if (g.type === 'Polygon') return polygonToPath(g.coordinates, w, h, p);
+  if (g.type === 'MultiPolygon') return g.coordinates.map(poly => polygonToPath(poly, w, h, p)).join('');
   return '';
 }
 
-function mapRange(value, domainMin, domainMax, rangeMin, rangeMax) {
-  if (domainMin === domainMax) return (rangeMin + rangeMax) / 2;
-  return rangeMin + ((value - domainMin) / (domainMax - domainMin)) * (rangeMax - rangeMin);
+function mapRange(v, d0, d1, r0, r1) {
+  if (d0 === d1) return (r0 + r1) / 2;
+  return r0 + ((v - d0) / (d1 - d0)) * (r1 - r0);
 }
 
-/* ── Graticule generation ── */
-function generateGraticule(width, height, padding) {
-  const paths = [];
-  // Latitude lines every 30°
-  for (let lat = -60; lat <= 80; lat += 30) {
-    let d = '';
-    for (let lon = -180; lon <= 180; lon += 5) {
-      const p = projectLonLat(lon, lat, width, height, padding);
-      d += (lon === -180 ? 'M' : 'L') + `${p.x},${p.y}`;
-    }
-    paths.push(d);
-  }
-  // Longitude lines every 60°
-  for (let lon = -180; lon <= 180; lon += 60) {
-    let d = '';
-    for (let lat = -70; lat <= 85; lat += 5) {
-      const p = projectLonLat(lon, lat, width, height, padding);
-      d += (lat === -70 ? 'M' : 'L') + `${p.x},${p.y}`;
-    }
-    paths.push(d);
-  }
-  return paths;
-}
-
-/* ── Alias & normalization utilities ── */
+/* ── 别名与数据预处理 ── */
 function normalizeName(name, aliasLookup) {
-  return aliasLookup.get(String(name || '').trim()) || String(name || '').trim();
+  const key = String(name || '').trim();
+  return aliasLookup.get(key) || key;
 }
 
 function buildAliasLookup(aliasRows) {
   const lookup = new Map();
-  aliasRows.forEach((row) => {
+  aliasRows.forEach(row => {
     lookup.set(row.canonical, row.canonical);
-    (row.aliases || []).forEach((alias) => lookup.set(alias, row.canonical));
+    (row.aliases || []).forEach(a => lookup.set(a, row.canonical));
   });
   return lookup;
 }
 
 function normalizeNodeInstitutions(node, aliasLookup, institutionNames) {
   return Array.from(new Set(asArray(node.institution)
-    .map((name) => normalizeName(name, aliasLookup))
-    .filter((name) => institutionNames.has(name))));
+    .map(n => normalizeName(n, aliasLookup))
+    .filter(n => institutionNames.has(n))));
 }
 
 function institutionId(name) {
   return `inst_${name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')}`;
 }
 
-function mergeInstitutions(rawInstitutions, aliasLookup) {
+function mergeInstitutions(raw, aliasLookup) {
   const merged = new Map();
-  rawInstitutions.forEach((item) => {
+  raw.forEach(item => {
     const institution = normalizeName(item.institution, aliasLookup);
     const current = merged.get(institution);
     if (!current) {
@@ -113,37 +104,15 @@ function mergeInstitutions(rawInstitutions, aliasLookup) {
   return Array.from(merged.values());
 }
 
-/* ── Color helpers ── */
-function colorByMode(item, mode) {
-  if (mode === 'org_type') {
-    if (item.org_type === 'university') return '#10b981';
-    if (item.org_type === 'company') return '#f59e0b';
-    return '#8b5cf6';
-  }
-  return item.community === 'chinese' ? '#ef4444' : '#3b82f6';
-}
-
-function createSymbol(item, radius, color) {
-  if (item.org_type === 'university') {
-    return createSvgElement('rect', { x: -radius, y: -radius, width: radius * 2, height: radius * 2, rx: 2, fill: color, class: 'map-point' });
-  }
-  if (item.org_type === 'research_lab') {
-    const r = radius;
-    return createSvgElement('path', { d: `M0,${-r} L${r},${r} L${-r},${r}Z`, fill: color, class: 'map-point' });
-  }
-  return createSvgElement('circle', { cx: 0, cy: 0, r: radius, fill: color, class: 'map-point' });
-}
-
-/* ── Build year-indexed paper map ── */
 function buildPapersByYearAndInstitution(nodes, aliasLookup, institutionNames) {
-  // Map<year, Map<institutionName, paperNode[]>>
   const yearMap = new Map();
-  nodes.forEach((node) => {
-    const year = node.year;
-    if (!year) return;
-    if (!yearMap.has(year)) yearMap.set(year, new Map());
-    const instMap = yearMap.get(year);
-    normalizeNodeInstitutions(node, aliasLookup, institutionNames).forEach((name) => {
+  nodes.forEach(node => {
+    if (!node.year) return;
+    const insts = normalizeNodeInstitutions(node, aliasLookup, institutionNames);
+    if (!insts.length) return;
+    if (!yearMap.has(node.year)) yearMap.set(node.year, new Map());
+    const instMap = yearMap.get(node.year);
+    insts.forEach(name => {
       if (!instMap.has(name)) instMap.set(name, []);
       instMap.get(name).push(node);
     });
@@ -151,479 +120,545 @@ function buildPapersByYearAndInstitution(nodes, aliasLookup, institutionNames) {
   return yearMap;
 }
 
-function buildInstitutionLinks(nodes, edges, aliasLookup, institutionNames) {
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const linkMap = new Map();
-  edges.forEach((edge) => {
-    const sourceNames = normalizeNodeInstitutions(nodeById.get(edge.source) || {}, aliasLookup, institutionNames);
-    const targetNames = normalizeNodeInstitutions(nodeById.get(edge.target) || {}, aliasLookup, institutionNames);
-    sourceNames.forEach((source) => {
-      targetNames.forEach((target) => {
-        if (source === target) return;
-        const [a, b] = source < target ? [source, target] : [target, source];
-        const key = `${a}__${b}`;
-        if (!linkMap.has(key)) linkMap.set(key, { source: a, target: b, count: 0 });
-        linkMap.get(key).count += 1;
-      });
-    });
-  });
-  return Array.from(linkMap.values()).sort((a, b) => b.count - a.count);
+/* ── 颜色 / 图形 ── */
+function colorForInstitution(item, mode) {
+  if (mode === 'org_type') {
+    if (item.org_type === 'university') return '#22d3ee';
+    if (item.org_type === 'company') return '#f59e0b';
+    return '#a78bfa';
+  }
+  return item.community === 'chinese' ? '#f43f5e' : '#38bdf8';
 }
 
-/* ── Overlap resolver ── */
-function computePositions(items, radiusById, width, height, padding) {
+function createSymbol(item, radius, color) {
+  if (item.org_type === 'university') {
+    return createSvgElement('rect', {
+      x: -radius, y: -radius, width: radius * 2, height: radius * 2, rx: 2,
+      fill: color, class: 'map-point'
+    });
+  }
+  if (item.org_type === 'research_lab') {
+    const r = radius;
+    return createSvgElement('path', {
+      d: `M0,${-r}L${r},${r}L${-r},${r}Z`,
+      fill: color, class: 'map-point'
+    });
+  }
+  return createSvgElement('circle', {
+    cx: 0, cy: 0, r: radius, fill: color, class: 'map-point'
+  });
+}
+
+/* ── 防重叠放置 ── */
+function computePositions(items, radiusById, W, H, P) {
   const positions = new Map();
   const anchorById = new Map();
-  items.forEach((item) => {
-    const anchor = projectLonLat(item.lng, item.lat, width, height, padding);
+  items.forEach(item => {
+    const anchor = projectLonLat(item.lng, item.lat, W, H, P);
     anchorById.set(item.id, anchor);
     positions.set(item.id, { ...anchor });
   });
 
-  for (let iteration = 0; iteration < 60; iteration += 1) {
-    for (let i = 0; i < items.length; i += 1) {
-      for (let j = i + 1; j < items.length; j += 1) {
-        const a = items[i];
-        const b = items[j];
-        const pa = positions.get(a.id);
-        const pb = positions.get(b.id);
-        let dx = pb.x - pa.x;
-        let dy = pb.y - pa.y;
-        let distance = Math.hypot(dx, dy);
-        if (distance < 0.01) {
-          const angle = (i + j + 1) * 2.399963;
-          dx = Math.cos(angle);
-          dy = Math.sin(angle);
-          distance = 1;
-        }
-        const minDist = (radiusById.get(a.id) || 6) + (radiusById.get(b.id) || 6) + 8;
-        if (distance >= minDist) continue;
-        const push = (minDist - distance) / 2;
-        const ux = dx / distance;
-        const uy = dy / distance;
-        pa.x -= ux * push;
-        pa.y -= uy * push;
-        pb.x += ux * push;
-        pb.y += uy * push;
+  for (let iter = 0; iter < 60; iter++) {
+    for (let i = 0; i < items.length; i++) {
+      for (let j = i + 1; j < items.length; j++) {
+        const a = items[i], b = items[j];
+        const pa = positions.get(a.id), pb = positions.get(b.id);
+        let dx = pb.x - pa.x, dy = pb.y - pa.y;
+        let dist = Math.hypot(dx, dy);
+        if (dist < 0.01) { dx = Math.cos(i + j); dy = Math.sin(i + j); dist = 1; }
+        const minDist = (radiusById.get(a.id) || 6) + (radiusById.get(b.id) || 6) + 6;
+        if (dist >= minDist) continue;
+        const push = (minDist - dist) / 2;
+        const ux = dx / dist, uy = dy / dist;
+        pa.x -= ux * push; pa.y -= uy * push;
+        pb.x += ux * push; pb.y += uy * push;
       }
     }
-    items.forEach((item) => {
+    items.forEach(item => {
       const pos = positions.get(item.id);
       const anchor = anchorById.get(item.id);
-      pos.x += (anchor.x - pos.x) * 0.04;
-      pos.y += (anchor.y - pos.y) * 0.04;
-      pos.x = Math.max(padding, Math.min(width - padding, pos.x));
-      pos.y = Math.max(padding, Math.min(height - padding, pos.y));
+      pos.x += (anchor.x - pos.x) * 0.05;
+      pos.y += (anchor.y - pos.y) * 0.05;
+      pos.x = Math.max(P, Math.min(W - P, pos.x));
+      pos.y = Math.max(P, Math.min(H - P, pos.y));
     });
   }
-
   return { positions, anchorById };
 }
 
-/* ════════════════════════════════════════════
-   MAIN INIT
-════════════════════════════════════════════ */
+/* ────────────────────────────────
+   主入口
+──────────────────────────────── */
 export async function initInstitutionMap(container) {
   if (!container) return;
-
-  const MIN_YEAR = 2013;
-  const MAX_YEAR = 2026;
 
   container.innerHTML = `
     <div class="module-shell">
       <p class="module-tag">Module 04</p>
-      <h3 class="module-title">机构发表时间线地图</h3>
-      <p class="module-subtitle">通过年份筛选，查看每年有哪些机构发表了 LLM 相关论文，观察研究力量的时空变化。</p>
+      <h3 class="module-title">机构影响力时间线地图</h3>
+      <p class="module-subtitle">拖动时间轴看谁在哪一年登场；开启“对比模式”直接并排观察两个时期的研究力量版图。</p>
 
-      <div class="scenario-panel institution-scenario-panel">
-        <div class="map-year-control">
-          <div class="map-year-header">
-            <span class="map-year-label">筛选年份</span>
-            <span class="map-year-value">${MIN_YEAR} – ${MAX_YEAR}</span>
+      <!-- ═════ 大型时间轴 ═════ -->
+      <div class="im-timeline-wrap">
+        <div class="im-timeline-head">
+          <div class="im-year-big">
+            <span class="im-year-a">${MAX_YEAR}</span>
+            <span class="im-year-sep" hidden> vs </span>
+            <span class="im-year-b" hidden></span>
           </div>
-          <div class="map-range-row">
-            <input type="range" class="map-year-start" min="${MIN_YEAR}" max="${MAX_YEAR}" value="${MIN_YEAR}" step="1" />
-            <input type="range" class="map-year-end" min="${MIN_YEAR}" max="${MAX_YEAR}" value="${MAX_YEAR}" step="1" />
+          <div class="im-timeline-controls">
+            <button class="im-play-btn" type="button">&#9654; 播放</button>
+            <label class="im-toggle">
+              <input type="checkbox" class="im-compare-toggle" />
+              <span>对比模式</span>
+            </label>
+            <label class="im-toggle">
+              <input type="checkbox" class="im-cumulative" checked />
+              <span>累计</span>
+            </label>
           </div>
-          <div class="map-year-ticks">
-            ${Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => `<span>${MIN_YEAR + i}</span>`).join('')}
-          </div>
-          <div class="map-play-row">
-            <button class="map-play-btn" type="button" title="自动播放年份动画">&#9654; 播放</button>
-            <label class="map-cumulative-label"><input type="checkbox" class="map-cumulative" checked /> 累计模式</label>
-          </div>
+        </div>
+        <div class="im-timeline" role="slider" aria-label="年份选择">
+          <div class="im-timeline-track"></div>
+          <div class="im-timeline-milestones"></div>
+          <div class="im-timeline-ticks"></div>
+          <div class="im-timeline-marker im-marker-a" style="left:100%"><span class="im-marker-label">${MAX_YEAR}</span></div>
+          <div class="im-timeline-marker im-marker-b" hidden><span class="im-marker-label"></span></div>
         </div>
       </div>
 
-      <div class="chart-toolbar chart-toolbar-wrap">
+      <!-- ═════ 色彩 / 大小控件 ═════ -->
+      <div class="chart-toolbar chart-toolbar-wrap im-toolbar">
         <label class="chart-control">
-          颜色维度
-          <select class="chart-select map-color-mode">
+          颜色
+          <select class="chart-select im-color-mode">
             <option value="community">研究社区</option>
             <option value="org_type">机构类型</option>
           </select>
         </label>
         <label class="chart-control">
-          大小维度
-          <select class="chart-select map-size-mode">
-            <option value="papers_in_range">年份内论文数</option>
+          大小
+          <select class="chart-select im-size-mode">
+            <option value="papers_in_range">当年论文数</option>
             <option value="influence_score">影响力</option>
-            <option value="citations_count">总引用数</option>
-            <option value="papers_count">总论文数</option>
+            <option value="citations_count">总引用</option>
           </select>
         </label>
-        <label class="chart-control">
-          <input class="map-link-toggle" type="checkbox" checked />
-          显示合作联系
-        </label>
-        <div class="chart-stat" aria-live="polite">加载中...</div>
+        <div class="chart-stat im-stat" aria-live="polite">加载中…</div>
       </div>
 
-      <div class="institution-layout">
-        <div class="module-canvas chart-canvas map-canvas">
-          <svg class="chart-svg map-svg" viewBox="0 0 960 480" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Institution world map"></svg>
+      <!-- ═════ 双地图 ═════ -->
+      <div class="im-maps" data-compare="off">
+        <div class="im-map-pane" data-role="a">
+          <div class="im-map-title">A: <b class="im-title-year-a">${MAX_YEAR}</b></div>
+          <svg class="im-svg" viewBox="0 0 960 480" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
-        <aside class="institution-side-panel">
-          <h4 class="institution-ranking-title">年份活跃机构排行</h4>
-          <p class="institution-scenario-evidence"></p>
-          <div class="institution-ranking"></div>
-        </aside>
+        <div class="im-map-pane" data-role="b" hidden>
+          <div class="im-map-title">B: <b class="im-title-year-b"></b></div>
+          <svg class="im-svg" viewBox="0 0 960 480" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
       </div>
-      <div class="chart-detail map-detail"></div>
-      <div class="legend-row map-legend"></div>
+
+      <!-- ═════ 排行榜柱状图 ═════ -->
+      <div class="im-ranking-wrap">
+        <h4 class="im-ranking-title">活跃机构排行（按论文数）</h4>
+        <div class="im-ranking"></div>
+      </div>
+
+      <div class="chart-detail im-detail"></div>
+      <div class="legend-row im-legend"></div>
     </div>
   `;
 
-  const colorModeEl = container.querySelector('.map-color-mode');
-  const sizeModeEl = container.querySelector('.map-size-mode');
-  const linkToggle = container.querySelector('.map-link-toggle');
-  const statEl = container.querySelector('.chart-stat');
-  const svg = container.querySelector('.map-svg');
-  const canvas = container.querySelector('.map-canvas');
-  const detailEl = container.querySelector('.map-detail');
-  const legendEl = container.querySelector('.map-legend');
-  const rankingEl = container.querySelector('.institution-ranking');
-  const yearValueEl = container.querySelector('.map-year-value');
-  const yearStartEl = container.querySelector('.map-year-start');
-  const yearEndEl = container.querySelector('.map-year-end');
-  const playBtn = container.querySelector('.map-play-btn');
-  const cumulativeEl = container.querySelector('.map-cumulative');
-  const evidenceEl = container.querySelector('.institution-scenario-evidence');
+  // DOM
+  const timelineEl = container.querySelector('.im-timeline');
+  const markerAEl = container.querySelector('.im-marker-a');
+  const markerBEl = container.querySelector('.im-marker-b');
+  const markerALabel = markerAEl.querySelector('.im-marker-label');
+  const markerBLabel = markerBEl.querySelector('.im-marker-label');
+  const milestonesEl = container.querySelector('.im-timeline-milestones');
+  const ticksEl = container.querySelector('.im-timeline-ticks');
+  const yearABigEl = container.querySelector('.im-year-a');
+  const yearBBigEl = container.querySelector('.im-year-b');
+  const yearSepEl = container.querySelector('.im-year-sep');
+  const titleYearA = container.querySelector('.im-title-year-a');
+  const titleYearB = container.querySelector('.im-title-year-b');
+  const playBtn = container.querySelector('.im-play-btn');
+  const compareToggle = container.querySelector('.im-compare-toggle');
+  const cumulativeEl = container.querySelector('.im-cumulative');
+  const colorModeEl = container.querySelector('.im-color-mode');
+  const sizeModeEl = container.querySelector('.im-size-mode');
+  const statEl = container.querySelector('.im-stat');
+  const mapsEl = container.querySelector('.im-maps');
+  const paneA = mapsEl.querySelector('[data-role="a"]');
+  const paneB = mapsEl.querySelector('[data-role="b"]');
+  const svgA = paneA.querySelector('svg');
+  const svgB = paneB.querySelector('svg');
+  const rankingEl = container.querySelector('.im-ranking');
+  const detailEl = container.querySelector('.im-detail');
+  const legendEl = container.querySelector('.im-legend');
 
-  if (!svg || !canvas || !statEl) return;
+  // 状态
+  let yearA = MAX_YEAR;
+  let yearB = 2017;
+  let compareMode = false;
+  let playing = false;
+  let playTimer = null;
+
+  // 时间轴 tick 和 milestone
+  const totalYears = MAX_YEAR - MIN_YEAR;
+  for (let y = MIN_YEAR; y <= MAX_YEAR; y++) {
+    const tick = document.createElement('div');
+    tick.className = 'im-tick';
+    if (y % 2 === 1) tick.classList.add('im-tick-minor');
+    tick.style.left = `${((y - MIN_YEAR) / totalYears) * 100}%`;
+    tick.innerHTML = `<span>${y}</span>`;
+    ticksEl.appendChild(tick);
+  }
+  MILESTONES.forEach(m => {
+    const pct = ((m.year - MIN_YEAR) / totalYears) * 100;
+    const el = document.createElement('div');
+    el.className = 'im-milestone';
+    el.style.left = `${pct}%`;
+    el.innerHTML = `<span class="im-milestone-dot"></span><span class="im-milestone-label">${m.label}</span>`;
+    milestonesEl.appendChild(el);
+  });
 
   try {
-    const [world, rawInstitutions, nodes, edges, aliasRows] = await Promise.all([
+    const [world, rawInst, nodes, edges, aliasRows] = await Promise.all([
       loadJson('./public/world.geojson').catch(() => ({ features: [] })),
       loadJson('./data/processed/institutions_geo.json'),
       loadJson('./data/processed/nodes.json'),
-      loadJson('./data/processed/edges.json'),
+      loadJson('./data/processed/edges.json').catch(() => []),
       loadJson('./data/processed/institution_aliases.json').catch(() => [])
     ]);
 
-    const width = 960;
-    const height = 480;
-    const padding = 20;
+    const W = 960, H = 480, P = 18;
     const aliasLookup = buildAliasLookup(aliasRows);
-    const tooltip = createInteractiveTooltip(canvas);
-    const institutions = mergeInstitutions(rawInstitutions, aliasLookup);
-    const institutionNames = new Set(institutions.map((item) => item.institution));
-    const byName = new Map(institutions.map((item) => [item.institution, item]));
-    const papersByYearInst = buildPapersByYearAndInstitution(nodes, aliasLookup, institutionNames);
-    const instLinks = buildInstitutionLinks(nodes, edges, aliasLookup, institutionNames).slice(0, 60);
+    const institutions = mergeInstitutions(rawInst, aliasLookup);
+    const instNames = new Set(institutions.map(i => i.institution));
+    const byName = new Map(institutions.map(i => [i.institution, i]));
+    const papersByYearInst = buildPapersByYearAndInstitution(nodes, aliasLookup, instNames);
 
-    /* ── Draw base map ── */
-    // Ocean background
-    svg.appendChild(createSvgElement('rect', { x: 0, y: 0, width, height, class: 'map-ocean', rx: 6 }));
+    const tooltipA = createInteractiveTooltip(paneA);
+    const tooltipB = createInteractiveTooltip(paneB);
 
-    // Graticule
-    const gratGroup = createSvgElement('g', { class: 'map-graticule-group' });
-    generateGraticule(width, height, padding).forEach((d) => {
-      gratGroup.appendChild(createSvgElement('path', { d, class: 'map-graticule' }));
-    });
-    svg.appendChild(gratGroup);
+    /* ── 画底图（每个 svg 单独绘） ── */
+    function drawBaseMap(svg) {
+      svg.innerHTML = '';
+      // 渐变海洋
+      const defs = createSvgElement('defs');
+      defs.innerHTML = `
+        <radialGradient id="im-ocean-${Math.random().toString(36).slice(2, 7)}" cx="50%" cy="50%" r="70%">
+          <stop offset="0%" stop-color="#1e293b" stop-opacity="1"/>
+          <stop offset="100%" stop-color="#0f172a" stop-opacity="1"/>
+        </radialGradient>
+      `;
+      svg.appendChild(defs);
+      svg.appendChild(createSvgElement('rect', {
+        x: 0, y: 0, width: W, height: H, class: 'im-ocean'
+      }));
 
-    // Land
-    const landGroup = createSvgElement('g', { class: 'map-land-group' });
-    (world.features || []).forEach((feature) => {
-      const pathData = geometryToPath(feature.geometry, width, height, padding);
-      if (pathData) landGroup.appendChild(createSvgElement('path', { d: pathData, class: 'world-land' }));
-    });
-    svg.appendChild(landGroup);
-
-    // Layers
-    const linkLayer = createSvgElement('g', { class: 'map-link-layer' });
-    const pointLayer = createSvgElement('g', { class: 'map-point-layer' });
-    const labelLayer = createSvgElement('g', { class: 'map-label-layer' });
-    svg.append(linkLayer, pointLayer, labelLayer);
-
-    /* ── State ── */
-    let filterStart = MIN_YEAR;
-    let filterEnd = MAX_YEAR;
-    let playing = false;
-    let playTimer = null;
-
-    /* ── Compute which institutions are active in the year range ── */
-    function getActiveInstitutions() {
-      const cumulative = cumulativeEl.checked;
-      const activeMap = new Map(); // name -> paper count in range
-
-      for (let y = (cumulative ? MIN_YEAR : filterStart); y <= filterEnd; y += 1) {
-        const yearInst = papersByYearInst.get(y);
-        if (!yearInst) continue;
-        yearInst.forEach((papers, name) => {
-          activeMap.set(name, (activeMap.get(name) || 0) + papers.length);
-        });
+      // 经纬线
+      const grat = createSvgElement('g', { class: 'im-graticule' });
+      for (let lat = -60; lat <= 75; lat += 30) {
+        let d = '';
+        for (let lon = -180; lon <= 180; lon += 5) {
+          const pt = projectLonLat(lon, lat, W, H, P);
+          d += (lon === -180 ? 'M' : 'L') + pt.x.toFixed(1) + ',' + pt.y.toFixed(1);
+        }
+        grat.appendChild(createSvgElement('path', { d, class: 'im-gratline' }));
       }
-      return activeMap;
+      for (let lon = -150; lon <= 150; lon += 30) {
+        let d = '';
+        for (let lat = -70; lat <= 80; lat += 5) {
+          const pt = projectLonLat(lon, lat, W, H, P);
+          d += (lat === -70 ? 'M' : 'L') + pt.x.toFixed(1) + ',' + pt.y.toFixed(1);
+        }
+        grat.appendChild(createSvgElement('path', { d, class: 'im-gratline' }));
+      }
+      svg.appendChild(grat);
+
+      // 陆地
+      const landGroup = createSvgElement('g', { class: 'im-land-group' });
+      (world.features || []).forEach(feature => {
+        const d = geometryToPath(feature.geometry, W, H, P);
+        if (d) landGroup.appendChild(createSvgElement('path', { d, class: 'im-land' }));
+      });
+      svg.appendChild(landGroup);
+
+      // 点图层
+      const pointLayer = createSvgElement('g', { class: 'im-points' });
+      const labelLayer = createSvgElement('g', { class: 'im-labels' });
+      svg.append(pointLayer, labelLayer);
+      return { pointLayer, labelLayer };
     }
 
-    function render() {
-      pointLayer.innerHTML = '';
-      labelLayer.innerHTML = '';
-      linkLayer.innerHTML = '';
+    const layersA = drawBaseMap(svgA);
+    let layersB = null;
 
-      const colorMode = colorModeEl.value;
+    /* ── 计算某个年份的活跃机构 ── */
+    function getActive(endYear) {
+      const useCumulative = cumulativeEl.checked;
+      const startYear = useCumulative ? MIN_YEAR : endYear;
+      const map = new Map();
+      for (let y = startYear; y <= endYear; y++) {
+        const yi = papersByYearInst.get(y);
+        if (!yi) continue;
+        yi.forEach((papers, name) => {
+          map.set(name, (map.get(name) || 0) + papers.length);
+        });
+      }
+      return map;
+    }
+
+    /* ── 渲染一个 pane ── */
+    function renderPane(pane, tooltip, layers, endYear) {
+      const active = getActive(endYear);
+      const visible = institutions.filter(i => active.has(i.institution));
+      layers.pointLayer.innerHTML = '';
+      layers.labelLayer.innerHTML = '';
+
+      if (!visible.length) return { visible: [], active };
+
       const sizeMode = sizeModeEl.value;
-      const showLinks = linkToggle.checked;
-      const activeMap = getActiveInstitutions();
+      const colorMode = colorModeEl.value;
+      const values = visible.map(i => sizeMode === 'papers_in_range' ? (active.get(i.institution) || 0) : Number(i[sizeMode]) || 0);
+      const minV = Math.min(...values), maxV = Math.max(...values);
+      const radiusById = new Map(visible.map((i, idx) => [i.id, mapRange(values[idx], minV, maxV, 4, 14)]));
 
-      // Filter institutions that have papers in range
-      const visible = institutions.filter((item) => activeMap.has(item.institution));
+      const { positions } = computePositions(visible, radiusById, W, H, P);
 
-      if (visible.length === 0) {
-        statEl.textContent = `${filterStart}–${filterEnd} 年份内无机构发表记录`;
-        rankingEl.innerHTML = '<p style="color:var(--muted)">该年份范围无数据</p>';
-        detailEl.innerHTML = '';
-        return;
-      }
-
-      // Compute sizes
-      const sizeValues = visible.map((item) => {
-        if (sizeMode === 'papers_in_range') return activeMap.get(item.institution) || 0;
-        return Number(item[sizeMode]) || 0;
-      });
-      const minVal = Math.min(...sizeValues);
-      const maxVal = Math.max(...sizeValues);
-      const radiusById = new Map(visible.map((item, i) => [item.id, mapRange(sizeValues[i], minVal, maxVal, 5, 16)]));
-
-      // Positions
-      const { positions, anchorById } = computePositions(visible, radiusById, width, height, padding);
-
-      // Draw links
-      if (showLinks) {
-        const visibleIds = new Set(visible.map((item) => item.id));
-        const filtered = instLinks.filter((link) => {
-          const s = byName.get(link.source);
-          const t = byName.get(link.target);
-          return s && t && visibleIds.has(s.id) && visibleIds.has(t.id);
-        });
-        const maxCount = Math.max(...filtered.map((l) => l.count), 1);
-        filtered.slice(0, 40).forEach((link) => {
-          const s = byName.get(link.source);
-          const t = byName.get(link.target);
-          const pa = positions.get(s.id);
-          const pb = positions.get(t.id);
-          if (!pa || !pb) return;
-          const line = createSvgElement('line', {
-            x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y,
-            class: 'map-institution-link',
-            'stroke-width': mapRange(link.count, 1, maxCount, 0.6, 3)
-          });
-          linkLayer.appendChild(line);
-        });
-      }
-
-      // Draw points
-      visible.forEach((item) => {
+      visible.forEach(item => {
         const pos = positions.get(item.id);
         if (!pos) return;
-        const radius = radiusById.get(item.id);
-        const color = colorByMode(item, colorMode);
-        const papersInRange = activeMap.get(item.institution) || 0;
+        const r = radiusById.get(item.id);
+        const color = colorForInstitution(item, colorMode);
+        const papersN = active.get(item.institution) || 0;
 
-        const group = createSvgElement('g', {
-          class: 'map-point-group',
-          'data-id': item.id,
-          transform: `translate(${pos.x},${pos.y})`,
-          tabindex: '0',
-          role: 'button'
+        const g = createSvgElement('g', {
+          class: 'im-point-group',
+          transform: `translate(${pos.x.toFixed(1)},${pos.y.toFixed(1)})`,
+          tabindex: '0'
         });
-
-        // Pulse ring for highly active institutions
-        if (papersInRange >= 3) {
-          const pulse = createSvgElement('circle', { cx: 0, cy: 0, r: radius + 3, class: 'map-pulse-ring', fill: 'none', stroke: color });
-          group.appendChild(pulse);
+        // 发光底
+        g.appendChild(createSvgElement('circle', {
+          r: r + 4, class: 'im-glow', fill: color
+        }));
+        // 高活跃脉冲
+        if (papersN >= 3) {
+          const pulse = createSvgElement('circle', {
+            r: r, class: 'im-pulse', fill: 'none', stroke: color, 'stroke-width': 1.5
+          });
+          g.appendChild(pulse);
         }
+        g.appendChild(createSymbol(item, r, color));
 
-        const symbol = createSymbol(item, radius, color);
-        group.appendChild(symbol);
-
-        // Tooltip
-        const url = institutionLink(item);
         const tooltipHtml = `
           <strong>${escapeHtml(item.institution)}</strong>
           <span>${escapeHtml(item.city)}, ${escapeHtml(item.country)}</span>
-          <span>${filterStart}–${filterEnd} 年论文: <b>${papersInRange}</b></span>
+          <span style="color:#fbbf24">${endYear}年${cumulativeEl.checked ? '累计' : ''}论文: <b>${papersN}</b></span>
           <span>总论文 ${item.papers_count} · 引用 ${Number(item.citations_count || 0).toLocaleString()}</span>
-          <span>影响力 ${item.influence_score} · 类型 ${item.org_type}</span>
-          ${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">查看机构</a>` : ''}
         `;
-        group.addEventListener('pointerenter', (e) => tooltip.show(e, tooltipHtml));
-        group.addEventListener('pointermove', (e) => tooltip.move(e));
-        group.addEventListener('pointerleave', () => tooltip.hideSoon());
-        group.addEventListener('click', () => setAppState({ selectedInstitutionId: item.id }, 'institution-map'));
-        pointLayer.appendChild(group);
+        g.addEventListener('pointerenter', e => tooltip.show(e, tooltipHtml));
+        g.addEventListener('pointermove', e => tooltip.move(e));
+        g.addEventListener('pointerleave', () => tooltip.hideSoon());
+        g.addEventListener('click', () => setAppState({ selectedInstitutionId: item.id }, 'institution-map'));
+        layers.pointLayer.appendChild(g);
 
-        // Labels for top institutions
-        if (papersInRange >= 3 || item.influence_score >= 75) {
+        // 顶部机构标签
+        if (papersN >= 3 || item.influence_score >= 80) {
           const label = createSvgElement('text', {
-            x: pos.x + radius + 4,
-            y: pos.y - radius - 2,
-            class: 'map-label'
+            x: pos.x + r + 4, y: pos.y - r - 1, class: 'im-label'
           });
           label.textContent = item.institution;
-          labelLayer.appendChild(label);
+          layers.labelLayer.appendChild(label);
         }
       });
 
-      // Stats
-      statEl.textContent = `${filterStart}–${filterEnd} 活跃机构 ${visible.length}/${institutions.length} · 联系 ${instLinks.length} 条`;
-
-      // Ranking
-      renderRanking(visible, activeMap);
-
-      // Detail
-      renderDetail(visible, activeMap);
-
-      // Legend
-      renderLegend();
-
-      // Evidence
-      evidenceEl.textContent = `显示 ${filterStart}–${filterEnd} 年间有论文发表的机构${cumulativeEl.checked ? '（累计模式）' : '（仅限年份内）'}`;
+      return { visible, active };
     }
 
-    function renderRanking(visible, activeMap) {
+    /* ── 渲染排行榜柱状图 ── */
+    function renderRanking(activeA, activeB) {
       rankingEl.innerHTML = '';
-      const sorted = visible.slice().sort((a, b) => (activeMap.get(b.institution) || 0) - (activeMap.get(a.institution) || 0));
-      sorted.slice(0, 15).forEach((item, index) => {
-        const count = activeMap.get(item.institution) || 0;
-        const row = document.createElement('button');
-        row.type = 'button';
-        row.className = 'institution-rank-row';
-        row.innerHTML = `<span>${index + 1}</span><strong>${escapeHtml(item.institution)}</strong><em>${count}篇</em>`;
-        row.addEventListener('click', () => setAppState({ selectedInstitutionId: item.id }, 'institution-map'));
+      // 合并所有活跃机构
+      const merged = new Map();
+      activeA.forEach((v, k) => merged.set(k, { a: v, b: 0 }));
+      if (activeB) {
+        activeB.forEach((v, k) => {
+          if (!merged.has(k)) merged.set(k, { a: 0, b: v });
+          else merged.get(k).b = v;
+        });
+      }
+      const sorted = Array.from(merged.entries())
+        .sort((x, y) => (y[1].a + y[1].b) - (x[1].a + x[1].b))
+        .slice(0, 12);
+      if (!sorted.length) {
+        rankingEl.innerHTML = '<p class="im-empty">当前年份无机构论文数据</p>';
+        return;
+      }
+      const maxVal = Math.max(...sorted.map(([, v]) => Math.max(v.a, v.b))) || 1;
+      sorted.forEach(([name, vals]) => {
+        const row = document.createElement('div');
+        row.className = 'im-rank-row';
+        const item = byName.get(name);
+        const color = item ? colorForInstitution(item, colorModeEl.value) : '#64748b';
+        row.innerHTML = `
+          <span class="im-rank-name" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+          <div class="im-rank-bars">
+            <div class="im-rank-bar-a" style="width:${(vals.a / maxVal) * 100}%;background:${color}">
+              <span>${vals.a || ''}</span>
+            </div>
+            ${activeB ? `<div class="im-rank-bar-b" style="width:${(vals.b / maxVal) * 100}%;background:${color};opacity:0.55">
+              <span>${vals.b || ''}</span>
+            </div>` : ''}
+          </div>
+        `;
+        row.addEventListener('click', () => {
+          if (item) setAppState({ selectedInstitutionId: item.id }, 'institution-map');
+        });
         rankingEl.appendChild(row);
       });
     }
 
-    function renderDetail(visible, activeMap) {
-      const total = visible.reduce((sum, item) => sum + (activeMap.get(item.institution) || 0), 0);
-      const topCountry = {};
-      visible.forEach((item) => {
-        topCountry[item.country] = (topCountry[item.country] || 0) + (activeMap.get(item.institution) || 0);
-      });
-      const countries = Object.entries(topCountry).sort((a, b) => b[1] - a[1]).slice(0, 5);
-      const countryText = countries.map(([c, n]) => `${c}(${n}篇)`).join('、');
-      detailEl.innerHTML = `<strong>${filterStart}–${filterEnd}</strong> 共 ${visible.length} 个机构发表 ${total} 篇论文。主要来源国：${countryText}`;
-    }
-
+    /* ── 图例 ── */
     function renderLegend() {
       legendEl.innerHTML = '';
       const items = colorModeEl.value === 'community'
-        ? [['#3b82f6', '英文社区'], ['#ef4444', '中文社区']]
-        : [['#f59e0b', '公司'], ['#10b981', '大学'], ['#8b5cf6', '研究实验室']];
-      items.forEach(([color, label]) => {
-        const chip = document.createElement('span');
-        chip.className = 'legend-chip map-legend-chip';
-        chip.innerHTML = `<span class="legend-swatch" style="background:${color}"></span>${label}`;
-        legendEl.appendChild(chip);
-      });
-      ['圆形=公司', '方形=大学', '三角=实验室', '脉冲环=年份内≥3篇'].forEach((label) => {
+        ? [['#38bdf8', '英文社区'], ['#f43f5e', '中文社区']]
+        : [['#f59e0b', '公司'], ['#22d3ee', '大学'], ['#a78bfa', '研究实验室']];
+      items.forEach(([c, lbl]) => {
         const chip = document.createElement('span');
         chip.className = 'legend-chip';
-        chip.textContent = label;
+        chip.innerHTML = `<span class="legend-swatch" style="background:${c}"></span>${lbl}`;
+        legendEl.appendChild(chip);
+      });
+      ['● 公司', '■ 大学', '▲ 实验室', '脉冲=年份内≥3篇'].forEach(lbl => {
+        const chip = document.createElement('span');
+        chip.className = 'legend-chip legend-chip-muted';
+        chip.textContent = lbl;
         legendEl.appendChild(chip);
       });
     }
 
-    /* ── Year slider handlers ── */
-    function updateYearDisplay() {
-      yearValueEl.textContent = filterStart === filterEnd ? `${filterStart}` : `${filterStart} – ${filterEnd}`;
+    /* ── 详情条 ── */
+    function renderDetail(resultA, resultB) {
+      const summarize = (r, year) => {
+        const total = Array.from(r.active.values()).reduce((s, n) => s + n, 0);
+        const countries = {};
+        r.visible.forEach(i => {
+          countries[i.country] = (countries[i.country] || 0) + (r.active.get(i.institution) || 0);
+        });
+        const top = Object.entries(countries).sort((x, y) => y[1] - x[1]).slice(0, 4)
+          .map(([c, n]) => `${c} ${n}`).join(' · ');
+        return `<b>${year}${cumulativeEl.checked ? ' 累计' : ''}</b> 机构 ${r.visible.length}，论文 ${total}。${top}`;
+      };
+      if (resultB) {
+        detailEl.innerHTML = `<div class="im-detail-row">${summarize(resultA, yearA)}</div><div class="im-detail-row">${summarize(resultB, yearB)}</div>`;
+      } else {
+        detailEl.innerHTML = summarize(resultA, yearA);
+      }
     }
 
-    yearStartEl.addEventListener('input', () => {
-      filterStart = Number(yearStartEl.value);
-      if (filterStart > filterEnd) {
-        filterEnd = filterStart;
-        yearEndEl.value = filterEnd;
+    /* ── 主渲染 ── */
+    function render() {
+      yearABigEl.textContent = yearA;
+      yearBBigEl.textContent = yearB;
+      markerALabel.textContent = yearA;
+      markerBLabel.textContent = yearB;
+      titleYearA.textContent = `${yearA}${cumulativeEl.checked ? ' 累计' : ''}`;
+      titleYearB.textContent = `${yearB}${cumulativeEl.checked ? ' 累计' : ''}`;
+      markerAEl.style.left = `${((yearA - MIN_YEAR) / totalYears) * 100}%`;
+      markerBEl.style.left = `${((yearB - MIN_YEAR) / totalYears) * 100}%`;
+
+      const resultA = renderPane(paneA, tooltipA, layersA, yearA);
+      let resultB = null;
+      if (compareMode) {
+        if (!layersB) layersB = drawBaseMap(svgB);
+        resultB = renderPane(paneB, tooltipB, layersB, yearB);
       }
-      updateYearDisplay();
+      renderRanking(resultA.active, resultB ? resultB.active : null);
+      renderLegend();
+      renderDetail(resultA, resultB);
+      statEl.textContent = compareMode
+        ? `对比模式 · A(${yearA}) ${resultA.visible.length} 机构 / B(${yearB}) ${resultB ? resultB.visible.length : 0} 机构`
+        : `${yearA}${cumulativeEl.checked ? ' 累计' : ''} · 活跃机构 ${resultA.visible.length}/${institutions.length}`;
+    }
+
+    /* ── 时间轴交互：点击/拖动 ── */
+    function pctToYear(pct) {
+      const y = Math.round(MIN_YEAR + pct * totalYears);
+      return Math.max(MIN_YEAR, Math.min(MAX_YEAR, y));
+    }
+    let dragging = null;
+    function onTimelinePointer(e) {
+      if (!dragging && e.type !== 'pointerdown') return;
+      const rect = timelineEl.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const y = pctToYear(pct);
+      const marker = dragging || (compareMode && Math.abs(y - yearB) < Math.abs(y - yearA) ? 'b' : 'a');
+      if (marker === 'a') yearA = y;
+      else yearB = y;
       render();
+    }
+    timelineEl.addEventListener('pointerdown', (e) => {
+      const rect = timelineEl.getBoundingClientRect();
+      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+      const y = pctToYear(pct);
+      // 判断点击更接近哪个 marker
+      if (compareMode && Math.abs(y - yearB) < Math.abs(y - yearA)) dragging = 'b';
+      else dragging = 'a';
+      timelineEl.setPointerCapture(e.pointerId);
+      onTimelinePointer(e);
     });
+    timelineEl.addEventListener('pointermove', onTimelinePointer);
+    timelineEl.addEventListener('pointerup', () => { dragging = null; });
+    timelineEl.addEventListener('pointercancel', () => { dragging = null; });
 
-    yearEndEl.addEventListener('input', () => {
-      filterEnd = Number(yearEndEl.value);
-      if (filterEnd < filterStart) {
-        filterStart = filterEnd;
-        yearStartEl.value = filterStart;
-      }
-      updateYearDisplay();
-      render();
-    });
-
-    cumulativeEl.addEventListener('change', render);
-
-    /* ── Play animation ── */
+    /* ── 播放 ── */
     function stopPlay() {
       playing = false;
-      if (playTimer) clearInterval(playTimer);
-      playTimer = null;
       playBtn.innerHTML = '&#9654; 播放';
       playBtn.classList.remove('is-playing');
+      if (playTimer) { clearInterval(playTimer); playTimer = null; }
     }
-
     function startPlay() {
       playing = true;
       playBtn.innerHTML = '&#9724; 停止';
       playBtn.classList.add('is-playing');
-      filterStart = MIN_YEAR;
-      filterEnd = MIN_YEAR;
-      yearStartEl.value = filterStart;
-      yearEndEl.value = filterEnd;
       cumulativeEl.checked = true;
-      updateYearDisplay();
+      yearA = MIN_YEAR;
       render();
-
       playTimer = setInterval(() => {
-        if (filterEnd >= MAX_YEAR) {
-          stopPlay();
-          return;
-        }
-        filterEnd += 1;
-        yearEndEl.value = filterEnd;
-        updateYearDisplay();
+        if (yearA >= MAX_YEAR) { stopPlay(); return; }
+        yearA += 1;
         render();
-      }, 1200);
+      }, 900);
     }
+    playBtn.addEventListener('click', () => playing ? stopPlay() : startPlay());
 
-    playBtn.addEventListener('click', () => {
-      if (playing) stopPlay();
-      else startPlay();
+    /* ── 对比模式 ── */
+    compareToggle.addEventListener('change', () => {
+      compareMode = compareToggle.checked;
+      mapsEl.setAttribute('data-compare', compareMode ? 'on' : 'off');
+      paneB.hidden = !compareMode;
+      markerBEl.hidden = !compareMode;
+      yearBBigEl.hidden = !compareMode;
+      yearSepEl.hidden = !compareMode;
+      render();
     });
 
-    /* ── Other controls ── */
+    /* ── 其他控件 ── */
     colorModeEl.addEventListener('change', render);
     sizeModeEl.addEventListener('change', render);
-    linkToggle.addEventListener('change', render);
-
+    cumulativeEl.addEventListener('change', render);
     onAppStateChange(() => render());
 
-    // Initial render
     render();
-
-  } catch (error) {
-    console.error('Institution map error:', error);
-    container.querySelector('.chart-stat').textContent = '数据加载失败，请检查 JSON 文件';
+  } catch (err) {
+    console.error('institution-map error', err);
+    statEl.textContent = '数据加载失败：' + err.message;
   }
 }
