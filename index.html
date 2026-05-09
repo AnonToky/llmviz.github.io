@@ -7,7 +7,7 @@
       name="description"
       content="交互式探索 LLM 论文主题热度、引用网络、关键路径与研究机构影响力。"
     />
-    <title>LLM 论文研究可视化</title>
+    <title>LLM 论文研究热点可视化</title>
     <link rel="icon" href="data:," />
     <link rel="stylesheet" href="./styles/main.css" />
   </head>
@@ -16,10 +16,10 @@
       <header class="site-header">
         <div class="hero-copy">
           <p class="eyebrow">大数据可视化与可视分析 · 期末课程设计</p>
-          <h1>探索 LLM 论文研究的热点变迁与递进影响路径</h1>
+          <h1>LLM 论文研究热点如何从表示学习演化到智能体？</h1>
           <p class="site-subtitle">
-            本作品将 LLM 相关的重要论文及其对应数据（关键词、引用关系和机构地理分布等）组织成一个可探索的数据文档，
-            聚焦 2013-2026 年大语言模型（LLM）领域内论文研究的变化与关系，展示其热点变化、论文图谱和机构影响力格局。
+            本作品把论文、关键词、引用关系和机构地理分布组织成一个可探索的数据文档，
+            聚焦 2013-2026 年大语言模型研究热点的阶段迁移、关键论文桥梁和机构影响力格局。
           </p>
         </div>
         <aside class="focus-panel" aria-live="polite">
@@ -53,22 +53,14 @@
       <main>
         <section class="story-intro" aria-labelledby="intro-title">
           <div>
-            <h2 id="intro-title">引言</h2>
+            <h2 id="intro-title">分析问题</h2>
             <p>
-              想象你是大语言模型（LLM）领域的新手研究者，面对学术网站上数量繁多的论文，我们往往会产生一些问题：
-              
-              1. 整个领域有哪些细分方向或技术流派，它们是如何演进的？谁是当前的热点，又是如何突出的？
-              2. 众多论文里，哪些是无论什么细分方向都必读的基石论文？哪些是关键的交叉点或承上启下？
-              3. 当聚焦于某一篇论文时，如何快速找出它的前置、后置论文？如何按其作者等指标展开细化阅读？
-
-              因此，我们把 LLM 相关的重要论文及其对应数据（关键词、引用关系和机构地理分布等）组织成一个可探索的数据文档，
-              聚焦 2013-2026 年大语言模型（LLM）领域内论文研究的变化与关系，通过几个可视化图表间的相互联动，试图解决上述问题。
-              
-              可以预先说明，LLM 研究不是线性增长，而是由若干关键机制反复重组形成的热点迁移。
-              本页面中的控件共享同一个年份和论文焦点，便于从宏观主题进入具体论文路径。
+              LLM 研究不是线性增长，而是由若干关键机制反复重组形成的热点迁移：
+              表示学习奠基、Transformer 预训练爆发、对齐与智能体成为新中心。
+              页面中的控件共享同一个年份和论文焦点，便于从宏观主题进入具体论文路径。
             </p>
           </div>
-          <!-- <div class="insight-strip">
+          <div class="insight-strip">
             <article>
               <span>01</span>
               <p>Transformer 之后，主题热度从模型结构转向规模化预训练。</p>
@@ -82,7 +74,7 @@
               <p>研究机构影响力集中在少数实验室与公司，但中文社区在对齐和小模型方向形成分支。</p>
             </article>
           </div>
-        </section> -->
+        </section>
 
         <section id="section-river" class="story-section">
           <div class="section-heading">
